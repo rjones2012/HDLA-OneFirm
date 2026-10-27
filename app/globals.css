@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Brand type: Flecha M for titles, Lato for everything else ── */
+@font-face { font-family: 'Flecha M'; src: url('/fonts/FlechaM-Light.otf') format('opentype'); font-weight: 300; font-display: swap; }
+@font-face { font-family: 'Flecha M'; src: url('/fonts/FlechaM-Regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Flecha M'; src: url('/fonts/FlechaM-RegularItalic.otf') format('opentype'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Flecha M'; src: url('/fonts/FlechaM-Medium.otf') format('opentype'); font-weight: 500; font-display: swap; }
+@font-face { font-family: 'Flecha M'; src: url('/fonts/FlechaM-Bold.otf') format('opentype'); font-weight: 700; font-display: swap; }
+@font-face { font-family: 'Lato'; src: url('/fonts/Lato-Light.ttf') format('truetype'); font-weight: 300; font-display: swap; }
+@font-face { font-family: 'Lato'; src: url('/fonts/Lato-Regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Lato'; src: url('/fonts/Lato-Italic.ttf') format('truetype'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Lato'; src: url('/fonts/Lato-Bold.ttf') format('truetype'); font-weight: 700; font-display: swap; }
+@font-face { font-family: 'Lato'; src: url('/fonts/Lato-BoldItalic.ttf') format('truetype'); font-weight: 700; font-style: italic; font-display: swap; }
+
+:root {
+  --ink: #141414;
+  --muted: #5C5C58;
+  --rule: #E3E3E0;
+  --hair: #EDEDEB;
+  --ground: #F7F7F5;
+  --accent: #E00087;
+  --accent-tint: #FDF2F8;
+  --red: #B42318;
+  --amber: #8A6D00;
+  --done: #8A8A86;
+}
+
+html { color: var(--ink); }
+body {
+  font-family: 'Lato', system-ui, sans-serif;
+  font-weight: 300;
+  font-size: 14px;
+  line-height: 1.4;
+  background-color: var(--ground);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, .font-flecha { font-family: 'Flecha M', Georgia, serif; font-weight: 700; }
+
+/* Pink tick boxes everywhere, 44px hit area via padding on the label */
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
+
+/* Form controls: hairline border, 3px radius, Lato */
+input, select, textarea, button { font-family: inherit; }
+
+/* Ported pages: the old "primary green" and shadowed cards become ink buttons and flat panels */
+.bg-hdla-green { background-color: var(--ink) !important; }
+.text-hdla-green { color: var(--accent) !important; }
+.border-hdla-green { border-color: var(--ink) !important; }
+.shadow, .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl { box-shadow: none !important; }
+
+/* Table standard on screen: black header, hairline rows */
+.of-table thead th { background: var(--ink); color: #fff; font-weight: 700; font-size: 12px; text-align: left; padding: 8px 12px; }
+.of-table tbody td { padding: 9px 12px; border-bottom: 1px solid var(--hair); font-size: 13px; }
+.of-table tbody tr.of-total td { border-top: 2px solid var(--ink); font-weight: 700; }
+.of-table tbody tr.of-mine { background: var(--accent-tint); }
+
+/* Milestone chips: one meaning per shape, one palette */
+.chip-deadline { background: var(--ink); color: #fff; }
+.chip-hard { background: var(--accent); color: #fff; }
+.chip-soft { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
+.chip-done { background: var(--hair); color: var(--done); text-decoration: line-through; }
+
+::selection { background: var(--accent-tint); }
