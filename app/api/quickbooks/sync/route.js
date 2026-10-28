@@ -4,7 +4,7 @@ import { syncAll, syncConnection } from '../../../../lib/quickbooks';
 import { supabaseAdmin } from '../../../../lib/supabaseAdmin';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120;
+export const maxDuration = 60; // Vercel Hobby cap; raise if the project is on Pro and pulls time out
 
 async function run(realmId) {
   const { data: runRow } = await supabaseAdmin.from('integration_runs').insert({ integration: 'qbo', status: 'running' }).select().single();

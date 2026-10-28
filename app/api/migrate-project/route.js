@@ -1,9 +1,35 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin, projectToDb } from '../../../lib/supabaseAdmin';
 import { graphFetch, getDrive, SHAREPOINT } from '../../../lib/graph';
-import { requireCaller, FINANCE } from '../../../lib/apiAuth';
+import { requireCaller, FINANCE, LEADERSHIP } from '../../../lib/apiAuth';
 
 export const dynamic = 'force-dynamic';
+
+// Work Plan → Dashboard → Data admin: re-key orphaned projections from an old project number to a new one
+// (e.g. a PR number that became a contracted number). Body: { oldProjectNum, newProjectNum }.
+async function renameProjectionKeys(oldProjectNum, newProjectNum) {
+  const { data: rows, error } = await supabaseAdmin
+    .from('projections').select('*').like('project_id', `${oldProjectNum}-%`);
+  if (error) throw error;
+  if (!rows || rows.length === 0) return 0;
+  const newIds = rows.map(r => `${newProjectNum}-${r.project_id.slice(oldProjectNum.length + 1)}`);
+  const { data: existing } = await supabaseAdmin.from('projections').select('*').in('project_id', newIds);
+  const existingById = {}; (existing || []).forEach(r => { existingById[r.project_id] = r; });
+  const upserts = rows.map((r, i) => {
+    const target = existingById[newIds[i]];
+    return {
+      project_id: newIds[i],
+      confidence: (target && target.confidence) || r.confidence || '',
+      // Existing values on the new key win; the old key's months fill in what's missing
+      months: { ...(r.months || {}), ...((target && target.months) || {}) },
+    };
+  });
+  const { error: upErr } = await supabaseAdmin.from('projections').upsert(upserts, { onConflict: 'project_id' });
+  if (upErr) throw upErr;
+  const { error: delErr } = await supabaseAdmin.from('projections').delete().in('project_id', rows.map(r => r.project_id));
+  if (delErr) throw delErr;
+  return rows.length;
+}
 
 // A missing file is not an error here (nothing to migrate), so this reads via graphFetch rather than downloadJson
 async function readSharePointFile(driveId, filename) {
@@ -17,6 +43,25 @@ async function readSharePointFile(driveId, filename) {
 }
 
 export async function POST(request) {
+  const body = await request.clone().json().catch(() => ({}));
+
+  // Projection re-key (Work Plan Data admin) — leadership. Checked before the SharePoint import so a
+  // Migrate click can never trigger the full legacy import below.
+  if (body && body.oldProjectNum && body.newProjectNum) {
+    const { error: authError } = await requireCaller(request, LEADERSHIP);
+    if (authError) return authError;
+    try {
+      const oldNum = String(body.oldProjectNum).trim(), newNum = String(body.newProjectNum).trim();
+      if (oldNum === newNum) return NextResponse.json({ success: false, error: 'Old and new project numbers are the same' }, { status: 400 });
+      const migratedCount = await renameProjectionKeys(oldNum, newNum);
+      return NextResponse.json({ success: true, migratedCount });
+    } catch (error) {
+      console.error('Projection re-key error:', error);
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
+  // Legacy one-time import of workplans-*.json from SharePoint — finance roles only
   const { error: authError } = await requireCaller(request, FINANCE);
   if (authError) return authError;
   console.log('=== MIGRATION START ===');

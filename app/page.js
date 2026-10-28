@@ -104,11 +104,15 @@ export default function Home() {
         {leadership && data.marketing && <Button onClick={() => setTp({ open: true })}>+ Touchpoint</Button>}
         <Button variant="secondary" href="/time">Log time</Button>
       </>}>
-      {loading || !derived ? <div className="text-muted animate-pulse py-10">Gathering your week…</div> : (
+      {user && !profile ? (
+        <div className="py-10 text-sm text-muted max-w-xl">
+          Signed in, but your staff profile didn't load. Reload the page; if it keeps happening, your login isn't linked to a staff profile yet — ask RJ or CM.
+        </div>
+      ) : loading || !derived ? <div className="text-muted animate-pulse py-10">Gathering your week…</div> : (
         <div className="flex flex-col gap-6">
 
           {/* Figures */}
-          <section className={'grid gap-4 ' + (finance ? 'grid-cols-4' : 'grid-cols-3')}>
+          <section className={'grid gap-4 ' + ((role === 'partner' || role === 'principal') ? 'grid-cols-4' : 'grid-cols-3')}>
             {role === 'partner' && <Figure label="My A/R outstanding" value={derived.myAging ? fmt$(derived.myAging.total) : '—'} sub={derived.myAging ? ((derived.myAging.d61 + derived.myAging.d90) > 0 ? `${fmt$(derived.myAging.d61 + derived.myAging.d90)} over 60 days` : 'Nothing over 60 days') : (data.aging ? 'No open invoices on your projects' : 'QuickBooks not connected yet')} red={!!derived.myAging && (derived.myAging.d61 + derived.myAging.d90) > 0} />}
             {role === 'principal' && <Figure label="My A/R outstanding" value={derived.pmAging ? fmt$(derived.pmAging.total) : '—'} sub={derived.pmAging ? `${derived.pmAging.invoices.length} open invoice${derived.pmAging.invoices.length === 1 ? '' : 's'} on my projects` : 'QuickBooks not connected yet'} />}
             {leadership && <Figure label="Weighted pipeline · firm" value={fmt$(derived.weighted)} sub={<>{derived.submittedCount} submitted · {derived.leads.length} leads{derived.newLeadsWeek ? <span className="text-accent font-bold"> · +{derived.newLeadsWeek} this week</span> : null}</>} />}

@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '../../../lib/supabaseAdmin';
-import { requireCaller, LEADERSHIP } from '../../../lib/apiAuth';
+import { requireCaller, hasRole, LEADERSHIP } from '../../../lib/apiAuth';
 
 export const dynamic = 'force-dynamic';
+
+// Anyone signed in may log a touchpoint (Time → "Log as touchpoint" is open to all staff with BD time)
+// and tick a next step. Everything else — events, IDIQ, priority list, deletes of clients/leads — is leadership only.
+const STAFF_ACTIONS = ['touchpoint', 'deleteTouchpoint', 'proposal', 'client', 'relLog', 'stepDone'];
 
 // Upsert that keeps working if the leads SQL (supabase-marketing-leads.sql)
 // has not been run yet: on a missing-column error, retry without the new fields.
@@ -112,17 +116,19 @@ const leadLabel = (p, cname) => (p.projectName || 'Untitled') + (cname ? ' · ' 
 const tpLabel = (t, cname) => [t.type || 'Touchpoint', cname ? 'with ' + cname : '', t.date ? '· ' + t.date : ''].filter(Boolean).join(' ');
 
 export async function GET(req) {
-  const { error: authError } = await requireCaller(req, LEADERSHIP);
+  const { caller, error: authError } = await requireCaller(req);
   if (authError) return authError;
+  const full = hasRole(caller, LEADERSHIP);
   try {
     const [clientsRes, tpRes, propRes, evtRes, relRes, idiqRes, priorityRes, steps] = await Promise.all([
       supabaseAdmin.from('marketing_clients').select('*').order('name'),
       supabaseAdmin.from('marketing_touchpoints').select('*').order('date', { ascending: false }),
       supabaseAdmin.from('marketing_proposals').select('*').order('created_at', { ascending: false }),
-      supabaseAdmin.from('marketing_events').select('*').order('date'),
-      supabaseAdmin.from('marketing_rel_log').select('*').order('date', { ascending: false }),
-      supabaseAdmin.from('marketing_idiqs').select('*').order('created_at', { ascending: false }),
-      supabaseAdmin.from('marketing_priority').select('*').order('position', { ascending: true }),
+      // non-leadership callers get just what the touchpoint form needs: clients, touchpoints, leads
+      full ? supabaseAdmin.from('marketing_events').select('*').order('date') : Promise.resolve({ data: [] }),
+      full ? supabaseAdmin.from('marketing_rel_log').select('*').order('date', { ascending: false }) : Promise.resolve({ data: [] }),
+      full ? supabaseAdmin.from('marketing_idiqs').select('*').order('created_at', { ascending: false }) : Promise.resolve({ data: [] }),
+      full ? supabaseAdmin.from('marketing_priority').select('*').order('position', { ascending: true }) : Promise.resolve({ data: [] }),
       loadStepRows(),
     ]);
     const stepsFor = (type, id) => steps.bySource[type + ':' + id] || [];
@@ -241,10 +247,13 @@ export async function GET(req) {
 }
 
 export async function POST(request) {
-  const { error: authError } = await requireCaller(request, LEADERSHIP);
+  const { caller, error: authError } = await requireCaller(request);
   if (authError) return authError;
   try {
     const body = await request.json();
+    if (!hasRole(caller, LEADERSHIP) && !Object.keys(body || {}).every(k => STAFF_ACTIONS.includes(k))) {
+      return NextResponse.json({ error: 'Not allowed for your role' }, { status: 403 });
+    }
 
     // ─── Client upsert ─────────────────────────────
     if (body.client) {

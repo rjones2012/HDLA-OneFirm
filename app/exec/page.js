@@ -359,12 +359,13 @@ function AgingPanel() {
     </Panel>
   );
   const sum = k => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
-  const firm = { partner: 'Firm total', current: sum('current'), d31: sum('d31'), d61: sum('d61'), d90: sum('d90'), total: sum('total') };
+  const firm = { partner: 'Firm total', current: sum('current'), d1: sum('d1'), d31: sum('d31'), d61: sum('d61'), d90: sum('d90'), total: sum('total') };
   return (
     <Panel title="Aging" meta={`QuickBooks · ${aging.data?.pulledAt ? `pulled ${fmtStamp(aging.data.pulledAt)}` : 'pulled'} · receivables by partner`}>
       <DataTable totalRow columns={[
         {header:'Partner', key:'partner'},
         {header:'Current', key:'current', align:'right', render: money},
+        {header:'1–30', key:'d1', align:'right', render: money},
         {header:'31–60', key:'d31', align:'right', render: money},
         {header:'61–90', key:'d61', align:'right', render: late},
         {header:'90+', key:'d90', align:'right', render: late},

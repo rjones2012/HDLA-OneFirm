@@ -836,7 +836,8 @@ export async function POST(req) {
     }
 
     if (action === 'saveClient') {
-      const c = body.client || {};
+      // The clients view decorates each legacy row with matched_client_id (not a column); strip it before writing
+      const { matched_client_id: _m, ...c } = body.client || {};
       if (!c.name) return NextResponse.json({ error: 'Name required' }, { status: 400 });
       const { data, error } = await supabaseAdmin.from('clients').upsert({ ...c, updated_at: now }, { onConflict: 'name' }).select().single();
       if (error) throw error;

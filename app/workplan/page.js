@@ -2165,7 +2165,8 @@ const VIEW_TABS = [
 ];
 
 function WorkPlansPageInner() {
-  const [principal, setPrincipal] = useState('MM');
+  // ?principal=AB (project page breadcrumb) or ?principal=ALL; anything else falls back to MM
+  const [principal, setPrincipal] = useState(() => { const v = qp('principal', 'MM'); return v === 'ALL' || PRINCIPAL_NAMES[v] ? v : 'MM'; });
   const [projects, setProjects] = useState([]);
   const [feeData, setFeeData] = useState([]);
   const [projectionData, setProjectionData] = useState({});

@@ -4,6 +4,7 @@ import { uploadFile } from '../../../lib/graph';
 import { requireCaller, isCron, FINANCE } from '../../../lib/apiAuth';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 async function writeToSharePoint(filename, data) {
   await uploadFile(filename, JSON.stringify(data, null, 2), 'application/json');

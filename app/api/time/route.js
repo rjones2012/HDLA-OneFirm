@@ -226,6 +226,7 @@ export async function GET(req) {
     }
 
     if (view === 'report') {
+      if (!hasRole(caller, LEADERSHIP)) return forbidden();
       const start = searchParams.get('start');
       const end = searchParams.get('end');
       if (!start || !end) return NextResponse.json({ error: 'Missing start or end' }, { status: 400 });

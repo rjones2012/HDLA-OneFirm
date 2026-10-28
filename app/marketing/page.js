@@ -59,6 +59,8 @@ export default function MarketingPage() {
   const [newOpen,setNewOpen]=useState(false);
   const newRef=useRef(null);
   useEffect(()=>{ const h=e=>{ if(newRef.current&&!newRef.current.contains(e.target)) setNewOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
+  // Deep links from the home page: /marketing?tab=pipeline, ?tab=touchpoints …
+  useEffect(()=>{ try{ const t=new URLSearchParams(window.location.search).get('tab'); if(t&&TABS.some(x=>x.id===t)) setTab(t); }catch{} },[]);
 
   // Load all data from Supabase + Master Data from SharePoint
   useEffect(()=>{
