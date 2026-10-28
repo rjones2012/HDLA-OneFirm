@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase';
 import { Shell } from '../../components/shell/Shell';
 import { Panel, Button, Link, Pill, Tabs, Input, Select, Textarea, Label, Empty } from '../../components/shell/ui';
 import { TouchpointModal, planTouchpointSave, uid as tpUid } from '../../components/marketing-shared';
+import * as XLSX from 'xlsx';
 
 /* ═══════════════════════════════════════════════════════════════════
    HDLA OneFirm — Time
@@ -996,6 +997,109 @@ function ApprovalsView({ profile, weekKey, monday, acctByCode, projects }) {
 }
 
 // ═══ FIRM REPORT ══════════════════════════════════════════════════
+// ═══ ENTRIES — every logged hour, filterable, exportable (invoicing and audit) ═══════════
+const isoDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function EntriesView({ masterData, acctByCode }) {
+  const now = new Date();
+  const [start, setStart] = useState(() => qp('start', isoDate(new Date(now.getFullYear(), now.getMonth(), 1))));
+  const [end, setEnd] = useState(() => qp('end', isoDate(now)));
+  const [userId, setUserId] = useState(() => qp('user_id', ''));
+  const [projectNum, setProjectNum] = useState(() => qp('project_num', ''));
+  const [q, setQ] = useState('');
+  const [projQ, setProjQ] = useState('');
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  const [groupBy, setGroupBy] = useState('none');
+  const [hideInternal, setHideInternal] = useState(false);
+  const load = useCallback(() => {
+    if (!start || !end) return;
+    setData(null); setErr('');
+    const u = new URLSearchParams({ view: 'entries', start, end }); if (userId) u.set('user_id', userId); if (projectNum) u.set('project_num', projectNum);
+    getJSON(`/api/time?${u}`).then(setData).catch(e => setErr(e.message));
+  }, [start, end, userId, projectNum]);
+  useEffect(() => { load(); }, [load]);
+  const projects = useMemo(() => { const m = {}; (masterData || []).forEach(r => { const n = String(r['Project #'] || ''); if (n && !m[n]) m[n] = r['Project Name'] || ''; }); Object.values(acctByCode || {}).forEach(a => { if (a.code && !m[a.code]) m[a.code] = a.name || ''; }); return Object.entries(m).map(([num, name]) => ({ num, name })).sort((a, b) => a.num.localeCompare(b.num)); }, [masterData, acctByCode]);
+  const projHits = projQ ? projects.filter(p => `${p.num} ${p.name}`.toLowerCase().includes(projQ.toLowerCase())).slice(0, 10) : [];
+  const rows = useMemo(() => { const base = data?.rows || []; const t = q.trim().toLowerCase(); return base.filter(r => (!hideInternal || r.billable) && (!t || `${r.project_num} ${r.project_name} ${r.phase} ${r.note} ${r.person} ${r.initials}`.toLowerCase().includes(t))); }, [data, q, hideInternal]);
+  const total = rows.reduce((s, r) => s + r.hours, 0);
+  const groups = useMemo(() => {
+    if (groupBy === 'none') return null;
+    const key = r => groupBy === 'project' ? `${r.project_num} ${r.project_name}` : groupBy === 'phase' ? `${r.project_num} ${r.project_name} · ${r.phase || '—'}` : groupBy === 'person' ? r.person : r.date;
+    const m = {}; rows.forEach(r => { const k = key(r); (m[k] = m[k] || { key: k, hours: 0, rows: [] }); m[k].hours += r.hours; m[k].rows.push(r); });
+    return Object.values(m).sort((a, b) => a.key.localeCompare(b.key));
+  }, [rows, groupBy]);
+  const totals = useMemo(() => {
+    const byPP = {}; rows.forEach(r => { const k = `${r.project_num}||${r.project_name}||${r.phase}`; byPP[k] = byPP[k] || { project_num: r.project_num, project_name: r.project_name, phase: r.phase, hours: 0, people: {} }; byPP[k].hours += r.hours; byPP[k].people[r.initials] = (byPP[k].people[r.initials] || 0) + r.hours; });
+    return Object.values(byPP).sort((a, b) => a.project_num.localeCompare(b.project_num) || (a.phase || '').localeCompare(b.phase || ''));
+  }, [rows]);
+  const exportXlsx = () => {
+    const wb = XLSX.utils.book_new();
+    const sheet1 = rows.map(r => ({ Date: r.date, Person: r.person, Initials: r.initials, 'Project #': r.project_num, 'Project Name': r.project_name, Phase: r.phase, Hours: r.hours, Note: r.note, Billable: r.billable ? 'Yes' : 'No', 'Week status': r.status, 'Internal group': r.account_group || '' }));
+    const ws1 = XLSX.utils.json_to_sheet(sheet1); ws1['!cols'] = [{ wch: 11 }, { wch: 22 }, { wch: 7 }, { wch: 10 }, { wch: 36 }, { wch: 8 }, { wch: 7 }, { wch: 60 }, { wch: 8 }, { wch: 11 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Entries');
+    const ws2 = XLSX.utils.json_to_sheet(totals.map(t => ({ 'Project #': t.project_num, 'Project Name': t.project_name, Phase: t.phase, Hours: Math.round(t.hours * 100) / 100, 'By person': Object.entries(t.people).map(([i, h]) => `${i} ${h}`).join(', ') })));
+    ws2['!cols'] = [{ wch: 10 }, { wch: 36 }, { wch: 8 }, { wch: 8 }, { wch: 50 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'By project & phase');
+    const byPerson = {}; rows.forEach(r => { byPerson[r.person] = (byPerson[r.person] || 0) + r.hours; });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(Object.entries(byPerson).map(([p, h]) => ({ Person: p, Hours: Math.round(h * 100) / 100 }))), 'By person');
+    const who = userId ? (data?.people || []).find(p => p.user_id === userId)?.initials : 'all';
+    XLSX.writeFile(wb, `HDLA-time-${start}_${end}${projectNum ? '-' + projectNum : ''}${who && who !== 'all' ? '-' + who : ''}.xlsx`);
+  };
+  const Th = ({ children, right }) => <th className={right ? 'text-right' : ''}>{children}</th>;
+  const Row = ({ r }) => (
+    <tr key={r.id} className={r.billable ? '' : 'text-muted'}>
+      <td className="whitespace-nowrap">{r.date}</td><td className="whitespace-nowrap">{r.person} <span className="text-muted">{r.initials}</span></td><td className="whitespace-nowrap">{r.project_num}</td><td>{r.project_name}</td><td>{r.phase ? <Pill kind="phase">{r.phase}</Pill> : <span className="text-muted">—</span>}</td><td className="text-right font-bold">{fmtH(r.hours)}</td><td className="max-w-[420px]">{r.note || <span className="text-muted">—</span>}</td><td><Pill kind={r.status === 'approved' ? 'solid' : r.status === 'returned' ? 'red' : 'outline'}>{r.status}</Pill></td>
+    </tr>
+  );
+  return (
+    <div className="space-y-4">
+      <Panel title="Find hours" meta="Work date range · person · project · notes" pad>
+        <div className="grid grid-cols-[auto_auto_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 items-end">
+          <div><Label htmlFor="e-start">From</Label><Input id="e-start" type="date" value={start} onChange={e => setStart(e.target.value)} /></div>
+          <div><Label htmlFor="e-end">To</Label><Input id="e-end" type="date" value={end} onChange={e => setEnd(e.target.value)} /></div>
+          <div><Label htmlFor="e-person">Person</Label><Select id="e-person" value={userId} onChange={e => setUserId(e.target.value)} className="w-full"><option value="">Everyone</option>{(data?.people || []).map(p => <option key={p.user_id} value={p.user_id}>{p.display_name} ({p.initials})</option>)}</Select></div>
+          <div className="relative"><Label htmlFor="e-proj">Project</Label>{projectNum ? <div className="h-[38px] flex items-center justify-between gap-2 border border-rule rounded-[3px] px-2.5 text-[13px] bg-accent-tint"><span className="truncate"><b className="font-bold">{projectNum}</b> {projects.find(p => p.num === projectNum)?.name || ''}</span><button type="button" className="text-xs text-muted hover:text-status-red" onClick={() => setProjectNum('')}>✕</button></div> : <Input id="e-proj" value={projQ} onChange={e => setProjQ(e.target.value)} placeholder="Search project # or name…" className="w-full" />}
+            {projHits.length > 0 && !projectNum && <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-rule rounded max-h-56 overflow-y-auto">{projHits.map(p => <button type="button" key={p.num} className="block w-full text-left px-2.5 py-1.5 text-[13px] hover:bg-accent-tint" onClick={() => { setProjectNum(p.num); setProjQ(''); }}><b className="font-bold">{p.num}</b> {p.name}</button>)}</div>}</div>
+          <div><Label htmlFor="e-q">Search notes / anything</Label><Input id="e-q" value={q} onChange={e => setQ(e.target.value)} placeholder="e.g. site visit, DD, Metro" className="w-full" /></div>
+        </div>
+        <div className="flex items-center gap-4 mt-3 flex-wrap text-[13px]">
+          <span className="text-muted">Quick:</span>
+          {[['This month', () => { setStart(isoDate(new Date(now.getFullYear(), now.getMonth(), 1))); setEnd(isoDate(now)); }], ['Last month', () => { setStart(isoDate(new Date(now.getFullYear(), now.getMonth() - 1, 1))); setEnd(isoDate(new Date(now.getFullYear(), now.getMonth(), 0))); }], ['Last 7 days', () => { const s = new Date(now); s.setDate(s.getDate() - 6); setStart(isoDate(s)); setEnd(isoDate(now)); }], ['Year to date', () => { setStart(`${now.getFullYear()}-01-01`); setEnd(isoDate(now)); }]].map(([l, f]) => <button key={l} type="button" onClick={f} className="font-bold text-accent">{l}</button>)}
+          <label className="flex items-center gap-1.5 ml-auto cursor-pointer"><input type="checkbox" checked={hideInternal} onChange={e => setHideInternal(e.target.checked)} /> Project time only</label>
+          <span className="text-muted">Group</span>
+          <Select value={groupBy} onChange={e => setGroupBy(e.target.value)} className="h-8"><option value="none">None</option><option value="project">Project</option><option value="phase">Project · phase</option><option value="person">Person</option><option value="date">Date</option></Select>
+        </div>
+      </Panel>
+
+      <Panel title={data ? `${rows.length.toLocaleString()} entries · ${fmtH(total) || 0} hours` : 'Entries'} meta={<><span>{start} to {end}{userId ? ' · one person' : ''}{projectNum ? ' · ' + projectNum : ''}</span>{rows.length > 0 && <Button variant="secondary" className="h-8 px-3" onClick={exportXlsx}>Export to Excel</Button>}</>}>
+        {err && <div className="px-5 py-3 text-sm text-status-red">{err}</div>}
+        {!data && !err ? <div className="py-10 text-center text-muted animate-pulse">Loading entries…</div> : rows.length === 0 ? <Empty>No hours match.</Empty> : (
+          <div className="overflow-x-auto">
+            <table className="of-table w-full">
+              <thead><tr><Th>Date</Th><Th>Person</Th><Th>Project #</Th><Th>Project</Th><Th>Phase</Th><Th right>Hours</Th><Th>Note</Th><Th>Week</Th></tr></thead>
+              <tbody>
+                {groups ? groups.map(g => (<React.Fragment key={g.key}><tr className="bg-ground"><td colSpan={5} className="font-bold">{g.key}</td><td className="text-right font-bold">{fmtH(g.hours)}</td><td colSpan={2} className="text-muted text-xs">{g.rows.length} entries</td></tr>{g.rows.map(r => <Row key={r.id} r={r} />)}</React.Fragment>)) : rows.map(r => <Row key={r.id} r={r} />)}
+                <tr className="of-total"><td colSpan={5}>Total</td><td className="text-right">{fmtH(total)}</td><td colSpan={2}></td></tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+
+      {rows.length > 0 && (
+        <Panel title="By project and phase" meta="What an invoice needs · same filters as above">
+          <div className="overflow-x-auto">
+            <table className="of-table w-full">
+              <thead><tr><Th>Project #</Th><Th>Project</Th><Th>Phase</Th><Th right>Hours</Th><Th>By person</Th></tr></thead>
+              <tbody>{totals.map(t => <tr key={`${t.project_num}|${t.project_name}|${t.phase}`}><td>{t.project_num}</td><td>{t.project_name}</td><td>{t.phase ? <Pill kind="phase">{t.phase}</Pill> : <span className="text-muted">—</span>}</td><td className="text-right font-bold">{fmtH(t.hours)}</td><td className="text-xs text-muted">{Object.entries(t.people).map(([i, h]) => `${i} ${fmtH(h)}`).join(' · ')}</td></tr>)}<tr className="of-total"><td colSpan={3}>Total</td><td className="text-right">{fmtH(total)}</td><td></td></tr></tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+    </div>
+  );
+}
+
 function FirmView({ masterData, config }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [data, setData] = useState(null);
@@ -1304,7 +1408,7 @@ function RatesView({ profile, masterData, config, onConfigChange }) {
 }
 
 // ═══ PAGE ═════════════════════════════════════════════════════════
-const VIEW_TITLE = { me: 'My Time', approvals: 'Approvals', firm: 'Firm Hours', rates: 'Rates & Accounts' };
+const VIEW_TITLE = { me: 'My Time', approvals: 'Approvals', entries: 'All Entries', firm: 'Firm Hours', rates: 'Rates & Accounts' };
 
 function TimeApp({ user, profile, masterData, projects, config, reloadConfig }) {
   const role = profile?.role || 'staff';
@@ -1322,6 +1426,7 @@ function TimeApp({ user, profile, masterData, projects, config, reloadConfig }) 
 
   const tabs = [{ id: 'me', label: 'Me' }];
   if (canApprove) tabs.push({ id: 'approvals', label: 'Approvals' });
+  if (canFirm) tabs.push({ id: 'entries', label: 'Entries' });
   if (canFirm) tabs.push({ id: 'firm', label: 'Firm' });
   if (canRates) tabs.push({ id: 'rates', label: 'Rates' });
 
@@ -1339,6 +1444,7 @@ function TimeApp({ user, profile, masterData, projects, config, reloadConfig }) 
       {tabs.length > 1 && <Tabs tabs={tabs} value={view} onChange={setView} />}
       {view === 'me' && <MyTimeView key={weekKey} user={user} profile={profile} weekKey={weekKey} monday={monday} masterData={masterData} projects={projects} accounts={accounts} acctByCode={acctByCode} onWeekChange={jumpToWeek} />}
       {view === 'approvals' && canApprove && <ApprovalsView profile={profile} weekKey={weekKey} monday={monday} acctByCode={acctByCode} projects={projects} />}
+      {view === 'entries' && canFirm && <EntriesView masterData={masterData} acctByCode={acctByCode} />}
       {view === 'firm' && canFirm && <FirmView masterData={masterData} config={config} />}
       {view === 'rates' && canRates && <RatesView profile={profile} masterData={masterData} config={config} onConfigChange={reloadConfig} />}
     </Shell>

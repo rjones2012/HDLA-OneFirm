@@ -197,6 +197,34 @@ export async function GET(req) {
       return NextResponse.json({ accounts: accounts || [], schedules: ctx.schedules, overrides: ctx.overrides, people, titles: RATE_TITLES, isPartner });
     }
 
+    // ── Entries: every logged hour as a row, for invoicing and audit. Partners, operations, office, principals. ──
+    //    ?start&end (work_date, inclusive) &user_id= &project_num= &q= (note / project text)
+    if (view === 'entries') {
+      if (!hasRole(caller, [...LEADERSHIP])) return forbidden();
+      const start = searchParams.get('start'), end = searchParams.get('end');
+      if (!start || !end) return NextResponse.json({ error: 'Missing start or end' }, { status: 400 });
+      const userId = searchParams.get('user_id') || '';
+      const projectNum = searchParams.get('project_num') || '';
+      const q = (searchParams.get('q') || '').trim().toLowerCase();
+      const [entries, ctx, { data: weeks }, { data: accounts }] = await Promise.all([
+        fetchAllRows(() => { let b = supabaseAdmin.from('time_entries').select('id, user_id, initials, work_date, week_key, project_num, project_name, phase, hours, note, billable, updated_at').gte('work_date', start).lte('work_date', end); if (userId) b = b.eq('user_id', userId); if (projectNum) b = b.eq('project_num', projectNum); return b; }),
+        loadRateContext(),
+        supabaseAdmin.from('time_weeks').select('user_id, week_key, status').gte('week_key', addDaysISO(start, -6)).lte('week_key', end),
+        supabaseAdmin.from('time_accounts').select('code, name, group_name'),
+      ]);
+      const profById = {}; ctx.profiles.forEach(p => { profById[p.id] = p; });
+      const wk = {}; (weeks || []).forEach(w => { wk[`${w.user_id}|${w.week_key}`] = w.status; });
+      const acct = {}; (accounts || []).forEach(a => { acct[a.code] = a; });
+      const rows = entries.map(e => ({
+        id: e.id, date: e.work_date, week_key: e.week_key, user_id: e.user_id, initials: e.initials || profById[e.user_id]?.initials || '', person: profById[e.user_id]?.display_name || e.initials || '',
+        project_num: e.project_num, project_name: e.project_name || acct[e.project_num]?.name || '', phase: e.phase || '', hours: Number(e.hours) || 0, note: e.note || '', billable: e.billable !== false,
+        status: wk[`${e.user_id}|${e.week_key}`] || 'draft', account_group: e.billable === false ? (acct[e.project_num]?.group_name || '') : '',
+      })).filter(r => !q || `${r.project_num} ${r.project_name} ${r.phase} ${r.note} ${r.person} ${r.initials}`.toLowerCase().includes(q))
+        .sort((a, b) => a.date.localeCompare(b.date) || a.person.localeCompare(b.person) || a.project_num.localeCompare(b.project_num));
+      const people = ctx.profiles.map(p => ({ user_id: p.id, initials: p.initials, display_name: p.display_name })).sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''));
+      return NextResponse.json({ start, end, rows, people, total: rows.reduce((s, r) => s + r.hours, 0) });
+    }
+
     if (view === 'report') {
       const start = searchParams.get('start');
       const end = searchParams.get('end');
